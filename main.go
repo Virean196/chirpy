@@ -28,8 +28,10 @@ func main() {
 		Handler: mux,
 		Addr:    ":" + port,
 	}
+	// Root handle
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot)))))
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, req *http.Request) {
+	// Status handle
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, err := w.Write([]byte("OK"))
@@ -38,13 +40,15 @@ func main() {
 		}
 
 	})
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, req *http.Request) {
-		metrics := fmt.Sprintf("Hits: %v", apiConfig.fileserverHits.Load())
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// Metrics handle
+	mux.HandleFunc("GET /admin/metrics", func(w http.ResponseWriter, req *http.Request) {
+		metrics := fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", apiConfig.fileserverHits.Load())
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(metrics))
 	})
-	mux.HandleFunc("POST /reset", func(w http.ResponseWriter, req *http.Request) {
+	// Reset metrics handle
+	mux.HandleFunc("POST /admin/reset", func(w http.ResponseWriter, req *http.Request) {
 		apiConfig.fileserverHits.Store(0)
 		w.WriteHeader(http.StatusOK)
 	})

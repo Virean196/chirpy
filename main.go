@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -51,11 +52,17 @@ func main() {
 
 	// Validate Chirpy JSON POST
 	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, req *http.Request) {
+		badWords := map[string]bool{
+			"kerfuffle": true,
+			"sharbert":  true,
+			"fornax":    true,
+		}
+
 		type params struct {
 			Body string `json:"body"`
 		}
 		type validResp struct {
-			Valid bool `json:"valid"`
+			CleanedBody string `json:"cleaned_body"`
 		}
 		type invalidResp struct {
 			Error string `json:"error"`
@@ -77,7 +84,15 @@ func main() {
 			return
 		}
 		if len(par.Body) <= 140 {
-			resp := validResp{Valid: true}
+			splitBody := strings.Split(par.Body, " ")
+			for i, word := range splitBody {
+				loweredWord := strings.ToLower(word)
+				if badWords[loweredWord] {
+					splitBody[i] = "****"
+				}
+			}
+			par.Body = strings.Join(splitBody, " ")
+			resp := validResp{par.Body}
 			dat, err := json.Marshal(resp)
 			if err != nil {
 				log.Printf("error marshalling response: %s", err)

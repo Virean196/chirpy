@@ -75,7 +75,6 @@ func main() {
 			"sharbert":  true,
 			"fornax":    true,
 		}
-
 		type params struct {
 			Body string `json:"body"`
 		}

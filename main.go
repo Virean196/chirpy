@@ -1,12 +1,18 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
+	"github.com/virean196/chirpy/internal/database"
 )
 
 const port = "8080"
@@ -14,6 +20,7 @@ const filepathRoot = http.Dir(".")
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	db             *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -25,6 +32,17 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 
 func main() {
 	var apiConfig apiConfig
+	// Load ENV
+	godotenv.Load()
+	dbUrl := os.Getenv("DB_URL")
+	// Start DB
+	db, err := sql.Open("postgres", dbUrl)
+	if err != nil {
+		log.Fatalf("error opening sql connection: %s", err)
+	}
+	dbQueries := database.New(db)
+	apiConfig.db = dbQueries
+	// Start multiplexer and http server
 	mux := http.NewServeMux()
 	httpServer := http.Server{
 		Handler: mux,

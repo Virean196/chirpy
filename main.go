@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/virean196/chirpy/internal/auth"
 	"github.com/virean196/chirpy/internal/database"
 )
 
@@ -32,12 +33,17 @@ type params struct {
 type invalidResp struct {
 	Error string `json:"error"`
 }
+type userReq struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
 
 type User struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Password  string    `json:"password,omitempty"`
 }
 type Chirp struct {
 	ID        uuid.UUID `json:"id"`
@@ -139,12 +145,19 @@ func main() {
 	// Handle user creation
 	mux.HandleFunc("POST /api/users", func(w http.ResponseWriter, req *http.Request) {
 		dec := json.NewDecoder(req.Body)
-		dbUser := database.User{}
-		err := dec.Decode(&dbUser)
+		userReq := userReq{}
+		err := dec.Decode(&userReq)
 		if err != nil {
 			log.Fatal("error decoding req")
 		}
-		dbUser, err = apiConfig.db.CreateUser(req.Context(), dbUser.Email)
+		pw, err := auth.HashPassword(userReq.Password)
+		if err != nil {
+			log.Fatal("error hashing password: %w", err)
+		}
+		dbUser, err := apiConfig.db.CreateUser(req.Context(), database.CreateUserParams{
+			Email:          userReq.Email,
+			HashedPassword: pw,
+		})
 		if err != nil {
 			log.Fatal("error creating user: %w", err)
 		}
@@ -153,8 +166,39 @@ func main() {
 			dbUser.CreatedAt,
 			dbUser.UpdatedAt,
 			dbUser.Email,
+			"",
 		}
 		respondWithJSON(w, 201, user)
+	})
+
+	// Handle POST Login
+	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, req *http.Request) {
+		dec := json.NewDecoder(req.Body)
+		par := userReq{}
+		err := dec.Decode(&par)
+		if err != nil {
+			log.Printf("error decoding request body: %s", err)
+		}
+		dbUser, err := apiConfig.db.GetUserByEmail(req.Context(), par.Email)
+		if err != nil {
+			respondWithError(w, 401, "Incorrect email or password")
+			return
+		}
+		err = auth.CheckPasswordHash(dbUser.HashedPassword, par.Password)
+		//log.Printf("Hashed Password: %s\nPassword being checked: %s\nResult: %s", dbUser.HashedPassword, par.Password, err)
+		if err != nil {
+			respondWithError(w, 401, "Incorrect email or password")
+			return
+		} else {
+			respUser := User{
+				dbUser.ID,
+				dbUser.CreatedAt,
+				dbUser.UpdatedAt,
+				dbUser.Email,
+				"",
+			}
+			respondWithJSON(w, 200, respUser)
+		}
 	})
 
 	// Handle posting Chips
@@ -193,6 +237,40 @@ func main() {
 		} else {
 			respondWithError(w, 400, "Something went wrong")
 		}
+	})
+
+	// Handle GET Chirps
+	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
+		chirps, err := apiConfig.db.GetChirps(context.Background())
+		if err != nil {
+			respondWithError(w, 400, "error getting chirps")
+		}
+		var chirpList []Chirp
+		for _, chirp := range chirps {
+			chirpList = append(chirpList, Chirp(chirp))
+		}
+		respondWithJSON(w, 200, chirpList)
+	})
+
+	// Handle GET Single Chirp
+	mux.HandleFunc("GET /api/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuid.Parse(r.PathValue("chirpID"))
+		if err != nil {
+			respondWithError(w, 400, "invalid id")
+		}
+		dbChirp, err := apiConfig.db.GetChirpById(context.Background(), id)
+		if err != nil {
+			respondWithError(w, 404, "no chirp with that id found")
+		}
+		chirp := Chirp{
+			dbChirp.ID,
+			dbChirp.CreatedAt,
+			dbChirp.UpdatedAt,
+			dbChirp.Body,
+			dbChirp.UserID,
+		}
+
+		respondWithJSON(w, 200, chirp)
 	})
 
 	// Start server

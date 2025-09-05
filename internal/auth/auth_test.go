@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +117,22 @@ func TestTamperedJWT(t *testing.T) {
 	_, err = ValidateJWT(tamperedToken, secret)
 	if err == nil {
 		t.Fatalf("expected error for tampered token, got none")
+	}
+}
+
+// Test bearer token
+func TestBearerToken(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Authorization", "Bearer 111222333")
+
+	// Get bearer token
+	token, err := GetBearerToken(headers)
+	t.Logf("Header: %s", token)
+	fmt.Print(token)
+	if err != nil {
+		t.Fatalf("error getting bearer token")
+	}
+	if token != "111222333" {
+		t.Fatalf("bearer token doesn't match expected token")
 	}
 }

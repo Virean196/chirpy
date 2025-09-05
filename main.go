@@ -21,21 +21,23 @@ import (
 
 const port = "8080"
 const filepathRoot = http.Dir(".")
+const defaultExpirationTimeInSeconds = 3600
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	jwtSecret      string
 }
 type params struct {
-	Body   string    `json:"body"`
-	UserID uuid.UUID `json:"user_id"`
+	Body string `json:"body"`
 }
 type invalidResp struct {
 	Error string `json:"error"`
 }
 type userReq struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
 }
 
 type User struct {
@@ -43,6 +45,7 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token,omitempty"`
 	Password  string    `json:"password,omitempty"`
 }
 type Chirp struct {
@@ -98,6 +101,7 @@ func main() {
 	godotenv.Load()
 	dbUrl := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	apiConfig.jwtSecret = os.Getenv("SECRET_KEY")
 	// Start DB
 	db, err := sql.Open("postgres", dbUrl)
 	if err != nil {
@@ -161,11 +165,15 @@ func main() {
 		if err != nil {
 			log.Fatal("error creating user: %w", err)
 		}
+		if err != nil {
+			respondWithError(w, 400, "error getting bearer token")
+		}
 		user := User{
 			dbUser.ID,
 			dbUser.CreatedAt,
 			dbUser.UpdatedAt,
 			dbUser.Email,
+			"",
 			"",
 		}
 		respondWithJSON(w, 201, user)
@@ -176,6 +184,11 @@ func main() {
 		dec := json.NewDecoder(req.Body)
 		par := userReq{}
 		err := dec.Decode(&par)
+		if par.ExpiresInSeconds == 0 {
+			par.ExpiresInSeconds = defaultExpirationTimeInSeconds
+		} else if par.ExpiresInSeconds > defaultExpirationTimeInSeconds {
+			par.ExpiresInSeconds = defaultExpirationTimeInSeconds
+		}
 		if err != nil {
 			log.Printf("error decoding request body: %s", err)
 		}
@@ -190,11 +203,16 @@ func main() {
 			respondWithError(w, 401, "Incorrect email or password")
 			return
 		} else {
+			token, err := auth.MakeJWT(dbUser.ID, apiConfig.jwtSecret, time.Duration(par.ExpiresInSeconds)*time.Second)
+			if err != nil {
+				respondWithError(w, 400, "error creating token")
+			}
 			respUser := User{
 				dbUser.ID,
 				dbUser.CreatedAt,
 				dbUser.UpdatedAt,
 				dbUser.Email,
+				token,
 				"",
 			}
 			respondWithJSON(w, 200, respUser)
@@ -218,13 +236,20 @@ func main() {
 		}
 		if len(par.Body) <= 140 {
 			filterBadWords(&par, badWords)
-			user, err := apiConfig.db.GetUserByID(context.Background(), par.UserID)
+			token, err := auth.GetBearerToken(req.Header)
 			if err != nil {
-				respondWithError(w, 400, "invalid user id")
+				respondWithError(w, 401, "invalid or missing auth token")
+				return
 			}
-			dbChirp, err := apiConfig.db.CreateChirp(req.Context(), database.CreateChirpParams{Body: par.Body, UserID: user.ID})
+			userID, err := auth.ValidateJWT(token, apiConfig.jwtSecret)
+			if err != nil {
+				respondWithError(w, 401, "invalid auth token")
+				return
+			}
+			dbChirp, err := apiConfig.db.CreateChirp(req.Context(), database.CreateChirpParams{Body: par.Body, UserID: userID})
 			if err != nil {
 				respondWithError(w, 400, "error creating chirp")
+				return
 			}
 			chirp := Chirp{
 				dbChirp.ID,
@@ -234,8 +259,10 @@ func main() {
 				dbChirp.UserID,
 			}
 			respondWithJSON(w, 201, chirp)
+			return
 		} else {
 			respondWithError(w, 400, "Something went wrong")
+			return
 		}
 	})
 

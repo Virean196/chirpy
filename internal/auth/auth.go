@@ -3,6 +3,8 @@ package auth
 import (
 	"fmt"
 	"log"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -39,10 +41,11 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	parsedToken, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if t.Method.Alg() == jwt.SigningMethodHS256.Alg() {
-			return []byte(tokenSecret), nil
+		// enforce HS256
+		if t.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("invalid signing method")
 		}
-		return uuid.UUID{}, fmt.Errorf("invalid signing method")
+		return []byte(tokenSecret), nil
 	})
 	if err != nil {
 		return uuid.Nil, err
@@ -54,14 +57,29 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	if !ok {
 		return uuid.Nil, fmt.Errorf("invalid claims type")
 	}
-	userId, err := claims.GetSubject()
+	sub := claims.Subject
+	if sub == "" {
+		return uuid.Nil, fmt.Errorf("missing subject")
+	}
+	uid, err := uuid.Parse(sub)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	parsedId, err := uuid.Parse(userId)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return parsedId, nil
+	return uid, nil
+}
 
+func GetBearerToken(headers http.Header) (string, error) {
+	auth := headers.Get("Authorization")
+	if auth == "" {
+		return "", fmt.Errorf("missing Authorization header")
+	}
+	parts := strings.Fields(auth)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return "", fmt.Errorf("invalid Authorization header")
+	}
+	token := strings.TrimSpace(parts[1])
+	if token == "" {
+		return "", fmt.Errorf("empty bearer token")
+	}
+	return token, nil
 }

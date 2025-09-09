@@ -35,18 +35,17 @@ type invalidResp struct {
 	Error string `json:"error"`
 }
 type userReq struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
-	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
-type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token,omitempty"`
-	Password  string    `json:"password,omitempty"`
+type response struct {
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
 }
 type Chirp struct {
 	ID        uuid.UUID `json:"id"`
@@ -168,7 +167,7 @@ func main() {
 		if err != nil {
 			respondWithError(w, 400, "error getting bearer token")
 		}
-		user := User{
+		resp := response{
 			dbUser.ID,
 			dbUser.CreatedAt,
 			dbUser.UpdatedAt,
@@ -176,7 +175,7 @@ func main() {
 			"",
 			"",
 		}
-		respondWithJSON(w, 201, user)
+		respondWithJSON(w, 201, resp)
 	})
 
 	// Handle POST Login
@@ -184,11 +183,6 @@ func main() {
 		dec := json.NewDecoder(req.Body)
 		par := userReq{}
 		err := dec.Decode(&par)
-		if par.ExpiresInSeconds == 0 {
-			par.ExpiresInSeconds = defaultExpirationTimeInSeconds
-		} else if par.ExpiresInSeconds > defaultExpirationTimeInSeconds {
-			par.ExpiresInSeconds = defaultExpirationTimeInSeconds
-		}
 		if err != nil {
 			log.Printf("error decoding request body: %s", err)
 		}
@@ -203,17 +197,26 @@ func main() {
 			respondWithError(w, 401, "Incorrect email or password")
 			return
 		} else {
-			token, err := auth.MakeJWT(dbUser.ID, apiConfig.jwtSecret, time.Duration(par.ExpiresInSeconds)*time.Second)
+			refresh_token, err := auth.MakeRefreshToken()
+			apiConfig.db.CreateRefreshToken(context.Background(), database.CreateRefreshTokenParams{
+				Token:  refresh_token,
+				UserID: dbUser.ID,
+			})
 			if err != nil {
-				respondWithError(w, 400, "error creating token")
+				respondWithError(w, 400, "error creating refresh token")
 			}
-			respUser := User{
+
+			jwt, err := auth.MakeJWT(dbUser.ID, apiConfig.jwtSecret, time.Duration(defaultExpirationTimeInSeconds)*time.Second)
+			if err != nil {
+				respondWithError(w, 400, "error creating jwt")
+			}
+			respUser := response{
 				dbUser.ID,
 				dbUser.CreatedAt,
 				dbUser.UpdatedAt,
 				dbUser.Email,
-				token,
-				"",
+				jwt,
+				refresh_token,
 			}
 			respondWithJSON(w, 200, respUser)
 		}

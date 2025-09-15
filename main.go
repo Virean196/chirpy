@@ -21,7 +21,6 @@ import (
 
 const port = "8080"
 const filepathRoot = http.Dir(".")
-const defaultExpirationTimeInSeconds = 3600
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
@@ -166,6 +165,7 @@ func main() {
 		}
 		if err != nil {
 			respondWithError(w, 400, "error getting bearer token")
+			return
 		}
 		resp := response{
 			dbUser.ID,
@@ -198,17 +198,18 @@ func main() {
 			return
 		} else {
 			refresh_token, err := auth.MakeRefreshToken()
+			if err != nil {
+				respondWithError(w, 400, "error creating refresh token")
+				return
+			}
 			apiConfig.db.CreateRefreshToken(context.Background(), database.CreateRefreshTokenParams{
 				Token:  refresh_token,
 				UserID: dbUser.ID,
 			})
-			if err != nil {
-				respondWithError(w, 400, "error creating refresh token")
-			}
-
-			jwt, err := auth.MakeJWT(dbUser.ID, apiConfig.jwtSecret, time.Duration(defaultExpirationTimeInSeconds)*time.Second)
+			jwt, err := auth.MakeJWT(dbUser.ID, apiConfig.jwtSecret)
 			if err != nil {
 				respondWithError(w, 400, "error creating jwt")
+				return
 			}
 			respUser := response{
 				dbUser.ID,
@@ -274,6 +275,7 @@ func main() {
 		chirps, err := apiConfig.db.GetChirps(context.Background())
 		if err != nil {
 			respondWithError(w, 400, "error getting chirps")
+			return
 		}
 		var chirpList []Chirp
 		for _, chirp := range chirps {
@@ -287,10 +289,12 @@ func main() {
 		id, err := uuid.Parse(r.PathValue("chirpID"))
 		if err != nil {
 			respondWithError(w, 400, "invalid id")
+			return
 		}
 		dbChirp, err := apiConfig.db.GetChirpById(context.Background(), id)
 		if err != nil {
 			respondWithError(w, 404, "no chirp with that id found")
+			return
 		}
 		chirp := Chirp{
 			dbChirp.ID,
@@ -301,6 +305,58 @@ func main() {
 		}
 
 		respondWithJSON(w, 200, chirp)
+	})
+
+	// Handle Refresh Tokens
+	mux.HandleFunc("POST /api/refresh", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 400, "error getting bearer token")
+			return
+		}
+		user, err := apiConfig.db.GetUserFromRefreshToken(context.Background(), token)
+		if err != nil {
+			respondWithError(w, 401, "invalid token")
+			return
+		}
+		refresh_token, err := apiConfig.db.GetRefreshToken(context.Background(), token)
+		if err != nil {
+			respondWithError(w, 401, "invalid token")
+			return
+		}
+		if refresh_token.RevokedAt.Valid {
+			respondWithError(w, 401, "invalid token")
+			return
+		}
+		jwt, err := auth.MakeJWT(user.ID, apiConfig.jwtSecret)
+		if err != nil {
+			respondWithError(w, 200, "error creating jwt")
+			return
+		}
+		type tokenResp struct {
+			Token string `json:"token"`
+		}
+		respondWithJSON(w, 200, tokenResp{Token: jwt})
+	})
+
+	// Handle Revoking Refresh Tokens
+	mux.HandleFunc("POST /api/revoke", func(w http.ResponseWriter, r *http.Request) {
+		token, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 400, "error getting bearer token")
+			return
+		}
+		err = apiConfig.db.RevokeRefreshToken(context.Background(), token)
+		if err != nil {
+			respondWithError(w, 400, "error revoking refresh token")
+			return
+		}
+		err = apiConfig.db.UpdateRefreshTokenUpdated_At(context.Background(), token)
+		if err != nil {
+			respondWithError(w, 400, "error updating token")
+			return
+		}
+		respondWithJSON(w, 204, "")
 	})
 
 	// Start server

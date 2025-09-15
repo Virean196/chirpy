@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -37,9 +36,8 @@ func TestHashPasswordAndCheck(t *testing.T) {
 func TestMakeAndValidateJWT(t *testing.T) {
 	userID := uuid.New()
 	secret := "testSecret"
-	expiration := time.Minute * 5
 
-	token, err := MakeJWT(userID, secret, expiration)
+	token, err := MakeJWT(userID, secret)
 	if err != nil {
 		t.Fatalf("failed to create token: %v", err)
 	}
@@ -54,28 +52,6 @@ func TestMakeAndValidateJWT(t *testing.T) {
 	}
 }
 
-// Test expired token validation
-func TestExpiredJWT(t *testing.T) {
-	userID := uuid.New()
-	secret := "testSecret"
-	expiration := -time.Minute // already expired
-
-	token, err := MakeJWT(userID, secret, expiration)
-	if err != nil {
-		t.Fatalf("failed to create token: %v", err)
-	}
-
-	_, err = ValidateJWT(token, secret)
-	if err == nil {
-		t.Fatalf("expected error for expired token, got none")
-	}
-
-	// Check that the error message contains "expired"
-	if !containsIgnoreCase(err.Error(), "expired") {
-		t.Fatalf("expected error to mention 'expired', got: %v", err)
-	}
-}
-
 // Helper to make case-insensitive substring checks
 func containsIgnoreCase(str, substr string) bool {
 	return len(str) >= len(substr) &&
@@ -87,9 +63,8 @@ func TestInvalidSignatureJWT(t *testing.T) {
 	userID := uuid.New()
 	secret := "testSecret"
 	wrongSecret := "wrongSecret"
-	expiration := time.Minute * 5
 
-	token, err := MakeJWT(userID, secret, expiration)
+	token, err := MakeJWT(userID, secret)
 	if err != nil {
 		t.Fatalf("failed to create token: %v", err)
 	}
@@ -104,9 +79,8 @@ func TestInvalidSignatureJWT(t *testing.T) {
 func TestTamperedJWT(t *testing.T) {
 	userID := uuid.New()
 	secret := "testSecret"
-	expiration := time.Minute * 5
 
-	token, err := MakeJWT(userID, secret, expiration)
+	token, err := MakeJWT(userID, secret)
 	if err != nil {
 		t.Fatalf("failed to create token: %v", err)
 	}

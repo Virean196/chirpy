@@ -8,3 +8,17 @@ VALUES(
     NOW() + INTERVAL '60 days'
 )
 RETURNING *;
+
+-- name: UpdateRefreshTokenUpdated_At :exec
+UPDATE refresh_tokens
+SET updated_at = NOW()
+WHERE token = $1;
+
+-- name: GetRefreshToken :one
+SELECT * FROM refresh_tokens
+WHERE token = $1;
+
+-- name: RevokeRefreshToken :exec
+UPDATE refresh_tokens 
+SET revoked_at = NOW()
+WHERE token = $1;

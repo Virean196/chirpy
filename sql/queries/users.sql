@@ -22,5 +22,10 @@ SELECT * FROM users
 INNER JOIN refresh_tokens ON users.id = refresh_tokens.user_id
 WHERE token = $1;
 
+-- name: UpdateUserInfo :exec
+UPDATE users
+SET email = $2, hashed_password = $3, updated_at = NOW()
+WHERE id = $1;
+
 -- name: DeleteAllUsers :exec
 DELETE FROM users;

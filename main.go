@@ -178,6 +178,43 @@ func main() {
 		respondWithJSON(w, 201, resp)
 	})
 
+	// Handle updating (PUT) users
+	mux.HandleFunc("PUT /api/users", func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		params := userReq{}
+		err := decoder.Decode(&params)
+		if err != nil {
+			respondWithError(w, 401, "invalid request")
+			return
+		}
+		jwt, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "invalid authorization header")
+			return
+		}
+		user_id, err := auth.ValidateJWT(jwt, apiConfig.jwtSecret)
+		if err != nil {
+			respondWithError(w, 401, "no user with token")
+			return
+		}
+		hashed_password, err := auth.HashPassword(params.Password)
+		if err != nil {
+			respondWithError(w, 400, "error hashing the password")
+			return
+		}
+		err = apiConfig.db.UpdateUserInfo(context.Background(), database.UpdateUserInfoParams{ID: user_id, Email: params.Email, HashedPassword: hashed_password})
+		if err != nil {
+			respondWithError(w, 401, "error updating user info")
+			return
+		}
+		db_user, err := apiConfig.db.GetUserByID(context.Background(), user_id)
+		if err != nil {
+			respondWithError(w, 401, "error getting user by id")
+			return
+		}
+		respondWithJSON(w, 200, userReq{Email: db_user.Email, Password: db_user.HashedPassword})
+	})
+
 	// Handle POST Login
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, req *http.Request) {
 		dec := json.NewDecoder(req.Body)
@@ -305,6 +342,41 @@ func main() {
 		}
 
 		respondWithJSON(w, 200, chirp)
+	})
+
+	// Handle deleting chirps
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", func(w http.ResponseWriter, r *http.Request) {
+		chirp_id, err := uuid.Parse(r.PathValue("chirpID"))
+		if err != nil {
+			respondWithError(w, 400, "invalid chirp id")
+			return
+		}
+		jwt, err := auth.GetBearerToken(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "invalid bearer header")
+			return
+		}
+		user_id, err := auth.ValidateJWT(jwt, apiConfig.jwtSecret)
+		if err != nil {
+			respondWithError(w, 404, "user not found for token")
+			return
+		}
+		chirp, err := apiConfig.db.GetChirpById(context.Background(), chirp_id)
+		if err != nil {
+			respondWithError(w, 404, "chirp not found")
+			return
+		}
+		if chirp.UserID == user_id {
+			err = apiConfig.db.DeleteChirpById(context.Background(), chirp_id)
+			if err != nil {
+				respondWithError(w, 400, "error deleting chirp")
+				return
+			}
+			respondWithJSON(w, 204, "")
+		} else {
+			respondWithError(w, 403, "user is not owner of chirp")
+			return
+		}
 	})
 
 	// Handle Refresh Tokens

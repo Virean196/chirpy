@@ -27,5 +27,20 @@ UPDATE users
 SET email = $2, hashed_password = $3, updated_at = NOW()
 WHERE id = $1;
 
+-- name: UpgradeToChirpyRedById :exec
+UPDATE users
+SET is_chirpy_red = true
+WHERE id = $1;
+
+-- name: DownGradeToChirpyRedById :exec
+UPDATE users
+SET is_chirpy_red = false
+WHERE id = $1;
+
 -- name: DeleteAllUsers :exec
 DELETE FROM users;
+
+-- name: UpdateUpdatedAtById :exec
+Update USERS
+SET updated_at = NOW()
+WHERE id = $1;

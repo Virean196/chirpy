@@ -26,6 +26,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	jwtSecret      string
+	polkaAPIKey    string
 }
 type params struct {
 	Body string `json:"body"`
@@ -45,6 +46,7 @@ type response struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
+	IsChirpRed   bool      `json:"is_chirpy_red"`
 }
 type Chirp struct {
 	ID        uuid.UUID `json:"id"`
@@ -52,6 +54,13 @@ type Chirp struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Body      string    `json:"body"`
 	UserID    uuid.UUID `json:"user_id"`
+}
+
+type polkaReq struct {
+	Event string `json:"event"`
+	Data  struct {
+		UserID uuid.UUID `json:"user_id"`
+	}
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -100,6 +109,7 @@ func main() {
 	dbUrl := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
 	apiConfig.jwtSecret = os.Getenv("SECRET_KEY")
+	apiConfig.polkaAPIKey = os.Getenv("POLKA_KEY")
 	// Start DB
 	db, err := sql.Open("postgres", dbUrl)
 	if err != nil {
@@ -174,6 +184,7 @@ func main() {
 			dbUser.Email,
 			"",
 			"",
+			dbUser.IsChirpyRed,
 		}
 		respondWithJSON(w, 201, resp)
 	})
@@ -255,6 +266,7 @@ func main() {
 				dbUser.Email,
 				jwt,
 				refresh_token,
+				dbUser.IsChirpyRed,
 			}
 			respondWithJSON(w, 200, respUser)
 		}
@@ -429,6 +441,43 @@ func main() {
 			return
 		}
 		respondWithJSON(w, 204, "")
+	})
+
+	// Handle membership upgrade
+	mux.HandleFunc("POST /api/polka/webhooks", func(w http.ResponseWriter, r *http.Request) {
+		apiKey, err := auth.GetAPIKey(r.Header)
+		if err != nil {
+			respondWithError(w, 401, "invalid auth header")
+			return
+		}
+		if apiKey == apiConfig.polkaAPIKey {
+			polkaRequest := polkaReq{}
+			dec := json.NewDecoder(r.Body)
+			err = dec.Decode(&polkaRequest)
+			if err != nil {
+				respondWithError(w, 401, "invalid request body")
+				return
+			}
+			if polkaRequest.Event != "user.upgraded" {
+				respondWithError(w, 204, "invalid event")
+				return
+			}
+			dbUser, err := apiConfig.db.GetUserByID(context.Background(), polkaRequest.Data.UserID)
+			if err != nil {
+				respondWithError(w, 404, "no user found")
+				return
+			}
+			err = apiConfig.db.UpgradeToChirpyRedById(context.Background(), dbUser.ID)
+			if err != nil {
+				respondWithError(w, 204, "error updating chirp")
+				return
+			}
+			apiConfig.db.UpdateUpdatedAtById(context.Background(), dbUser.ID)
+			respondWithJSON(w, 204, "user upgraded")
+		} else {
+			respondWithError(w, 401, "invalid api key")
+			return
+		}
 	})
 
 	// Start server

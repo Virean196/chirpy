@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -321,12 +322,41 @@ func main() {
 
 	// Handle GET Chirps
 	mux.HandleFunc("GET /api/chirps", func(w http.ResponseWriter, req *http.Request) {
+		author_query := req.URL.Query().Get("author_id")
+		sort_query := req.URL.Query().Get("sort")
+		var chirpList []Chirp
+		if author_query != "" {
+			id, err := uuid.Parse(author_query)
+			if err != nil {
+				respondWithError(w, 401, "error parsing author id")
+				return
+			}
+			chirps, err := apiConfig.db.GetChirpsByAuthor(context.Background(), id)
+			if err != nil {
+				respondWithError(w, 404, "no chirps found for that author")
+				return
+			}
+			for _, chirp := range chirps {
+				chirpList = append(chirpList, Chirp(chirp))
+			}
+			respondWithJSON(w, 200, chirpList)
+			return
+		}
 		chirps, err := apiConfig.db.GetChirps(context.Background())
 		if err != nil {
 			respondWithError(w, 400, "error getting chirps")
 			return
 		}
-		var chirpList []Chirp
+		if sort_query != "" && strings.ToLower(sort_query) == "desc" {
+			sort.Slice(chirps, func(i, j int) bool {
+				return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+			})
+			for _, chirp := range chirps {
+				chirpList = append(chirpList, Chirp(chirp))
+			}
+			respondWithJSON(w, 200, chirpList)
+			return
+		}
 		for _, chirp := range chirps {
 			chirpList = append(chirpList, Chirp(chirp))
 		}
